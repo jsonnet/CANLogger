@@ -12,6 +12,9 @@
 
 ###Attack Phase
 - Check online web hook for commands and execute
+- Replay attack (parameter with id)
+- Ingestion attack (parameter with id to send from and payload)
+- Bus-Off attack for specific modules
 - Also a possibility to upload the logs to a specific place
 - Execute commands until receiving a exit cmd
 
