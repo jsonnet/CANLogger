@@ -2,7 +2,7 @@ from ublox_gps import MicropyGPS
 from pyb import UART
 from pyb import CAN
 from SIM800L import Modem
-import time  # FIXME to utime
+import utime
 from pyb import RTC
 import pyb
 import machine
@@ -10,66 +10,74 @@ import machine
 import os
 
 VERSION = 0.1
+PATH = '' # FIXME /sd/
 
-
-def log(*args):
-    with open('can.log', 'a') as f:
-        print(','.join(str(args)), file=f)
-
+# Logs input to can.log
+# args will be seperated by komma and printed each time a new line
+def log(*args, file='can.log'):
+    with open(PATH + file, 'a') as f:
+        print(','.join(args), file=f)
     os.sync()
 
 
+# Override is working | TODO test modem working?
 def ota():
-    modem.connect(apn=modem.scan_networks())  # FIXME check apn
-    url = 'ota'  # FIXME add correct Website
+    url = 'https://raw.githubusercontent.com/jsonnet/CANLogger/master/version?token=ABOA4NLENQYN3IFQMFUI77S6N6OZW'
     response = modem.http_request(url, 'GET')
+    
+    # If a newer version is available
     if float(response.content) > VERSION:
-        url = 'update'  # FIXME add correct Website
+        url = 'https://raw.githubusercontent.com/jsonnet/CANLogger/master/code/main.py'
         response = modem.http_request(url, 'GET')
-        with open('/sd/main.py', 'w') as f:
-            f.write(response.content)
+        # Override existing main file and reboot
+        with open(PATH + 'main.py', 'w') as f:
+            print(response.content, file=f)
+            # Force buffer write and restart
+            os.sync()
             machine.soft_reset()
 
 def setup():
-    global gps, rtc, can, uart, sim_uart, interrupt, modem
+    # FIXME convert to class
+    global gps, rtc, can, can2, gps_uart, sim_uart, interrupt, modem
+    
     # GPS init
-    uart = UART(1, 9600)  # init with given baudrate
-    uart.init(9600, bits=8, parity=None, stop=1)  # init with given parameters
-
-    # GPS Lib init
+    gps_uart = UART(1, 9600)  # init with given baudrate
+    gps_uart.init(9600, bits=8, parity=None, stop=1, read_buf_len=512//2)  # init with given parameters
     gps = MicropyGPS()
 
-    # CAN init 500 MHz
-    can = CAN(1, CAN.LOOPBACK, extframe=False, prescaler=8, sjw=1, bs1=14, bs2=6)
+    # CAN init (500 MHz)
+    can = CAN(1, CAN.NORMAL, prescaler=2, sjw=1, bs1=14, bs2=6)
+    can2 = CAN(2, CAN.NORMAL, prescaler=2, sjw=1, bs1=14, bs2=6)
     #can.setfilter(0, CAN.MASK32, 0, (0x0, 0x0))
     can.setfilter(0, CAN.LIST16, 0, (23, 24, 25, 26))
 
-    # SIM800L Lib init
+    # SIM800L init
     sim_uart = UART(4, 9600, timeout=1000)
+    modem = Modem(sim_uart)
+    modem.initialize()
+    
+    modem.connect(apn=modem.scan_networks()[0][0])  # FIXME check apn or set static
 
-    # Create new modem object on the right Pins
-    modem = Modem()
-
-    # Initialize the modem
-    #modem.initialize()
-
-    # Clock init
+    # Clock init #TODO set correct time and connect battery
     rtc = RTC()
 
     # Interrupt Flag init
     interrupt = False
-    x5 = pyb.Pin.board.X5
-    x5.irq(trigger=pyb.Pin.IRQ_RISING, handler=incoming_call)
+    pyb.ExtInt('X5', pyb.ExtInt.IRQ_FALLING, pyb.Pin.PULL_UP, incoming_call)
 
     # Software Update
-    #ota()
+    ota()
 
 
-def incoming_call():
+# Callback function for incoming call to initiate attack mode
+def incoming_call(_):
     global interrupt
+    # TODO modem hangup (already implemented cmd in modem!)
+    # TODO possibly send SMS as conformation?
+    # TODO light up some LEDs
     interrupt = True
 
-
+# FIXME needs a lot of work
 def handle():
     global interrupt
     modem.connect(apn=modem.scan_networks())  # FIXME check apn
@@ -79,29 +87,35 @@ def handle():
     # FIXME Add other commands
 
     url = 'Upload'  # FIXME add correct Website
-    with open('/sd/can.log', 'r') as f:
+    with open(PATH + 'can.log', 'r') as f:
         data = f.read()  # FIXME readlines
     response = modem.http_request(url, 'POST', data, 'application/text')
     if response.status_code == 200:
-        os.remove('/sd/can.log')
+        os.remove(PATH + 'can.log')
 
+    # TODO only with EXIT command
     interrupt = False
 
 
 def loop():
-    gps_time = time.time()
-    # can_time = time.time()
+    gps_time = utime.ticks_ms()
 
     while True:
-        if time.time() - gps_time >= 1000:
-            gps.updateall(uart.read())
-            log((rtc.datetime(), gps.latitude, gps.longitude, gps.speed))
+        ## Logging mode ##
+    
+        # Only log gps once a second
+        if utime.ticks_ms() - gps_time >= 1000:
+            gps_time = utime.ticks_ms()
+            
+            gps.updateall(gps_uart.read())
+            log(rtc.datetime(), gps.latitude_string(), gps.longitude_string(), gps.speed_string())
 
-        can.send(b'1234', 23, timeout=10000)
-        log((rtc.datetime(), can.recv(0)))
-        print("logged!")
-
-        if interrupt:
+        # Log new incoming can messages
+        #can2.send(b'1234', 23, timeout=10000) ## FIXME debug
+        log(rtc.datetime(), str(can.recv(0)))
+        
+        ## Attack mode ##
+        while interrupt:
             handle()
 
 
