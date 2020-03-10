@@ -11,7 +11,7 @@
 - Check for attack flag
 
 ###Attack Phase
-- Check online web hook for commands and execute
+- Check online web hook for commands and execute (new IDEA Telegram/Discord Bot)
 - Replay attack (parameter with id)
 - Ingestion attack (parameter with id to send from and payload)
 - Bus-Off attack for specific modules

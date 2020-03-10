@@ -1,4 +1,5 @@
 from ublox_gps import MicropyGPS
+from telegram import TelegramBot
 from pyb import UART
 from pyb import CAN
 from SIM800L import Modem
@@ -8,6 +9,9 @@ import pyb
 import machine
 
 import os
+
+GPS_LOG_TIME = 5000  # 5s
+SHUTOFF_TIME = 30000  # 30s of no CAN activity
 
 VERSION = 0.1
 PATH = '' # FIXME /sd/
@@ -20,7 +24,7 @@ def log(*args, file='can.log'):
     os.sync()
 
 
-# Override is working | TODO test modem working?
+# Override is working | TODO test modem working? -> definitly response.content (see implementation!)
 def ota():
     url = 'https://raw.githubusercontent.com/jsonnet/CANLogger/master/version?token=ABOA4NLENQYN3IFQMFUI77S6N6OZW'
     response = modem.http_request(url, 'GET')
@@ -46,8 +50,8 @@ def setup():
     gps = MicropyGPS()
 
     # CAN init (500 MHz)
-    can = CAN(1, CAN.NORMAL, prescaler=2, sjw=1, bs1=14, bs2=6)
-    can2 = CAN(2, CAN.NORMAL, prescaler=2, sjw=1, bs1=14, bs2=6)
+    can = CAN(1, CAN.NORMAL, prescaler=4, sjw=1, bs1=16, bs2=4, auto_restart=True)
+    can2 = CAN(2, CAN.NORMAL, prescaler=4, sjw=1, bs1=14, bs2=6)
     #can.setfilter(0, CAN.MASK32, 0, (0x0, 0x0))
     can.setfilter(0, CAN.LIST16, 0, (23, 24, 25, 26))
 
@@ -67,6 +71,9 @@ def setup():
 
     # Software Update
     ota()
+    
+    # Telegram Bot
+    telegram = api.TelegramBot('API-KEY')
 
 
 # Callback function for incoming call to initiate attack mode
@@ -88,13 +95,28 @@ def handle():
 
     url = 'Upload'  # FIXME add correct Website
     with open(PATH + 'can.log', 'r') as f:
-        data = f.read()  # FIXME readlines
+        data = f.read()  # Okay, will print \n explicitly!
     response = modem.http_request(url, 'POST', data, 'application/text')
     if response.status_code == 200:
         os.remove(PATH + 'can.log')
 
     # TODO only with EXIT command
     interrupt = False
+
+
+# PoC for Telegram
+def message_handler(messages):
+    for message in messages:
+        if message[2] == '/start':
+            telegram.send(message[0], 'CAN Logger in attack mode, ready for you!')
+        else:
+            # do something switch case for all commands
+            
+            telegram.send(message[0], 'Okay!')
+    #gc.collect()
+
+telegram.listen(message_handler)
+
 
 
 def loop():
@@ -104,7 +126,7 @@ def loop():
         ## Logging mode ##
     
         # Only log gps once a second
-        if utime.ticks_ms() - gps_time >= 1000:
+        if utime.ticks_ms() - gps_time >= GPS_LOG_TIME:
             gps_time = utime.ticks_ms()
             
             gps.updateall(gps_uart.read())
