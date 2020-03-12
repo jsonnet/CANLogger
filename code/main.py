@@ -1,8 +1,9 @@
-from ublox_gps import MicropyGPS
-from telegram import TelegramBot
+from libs.ublox_gps import MicropyGPS
+from libs.telegram import TelegramBot
 from pyb import UART
 from pyb import CAN
-from SIM800L import Modem
+from pyb import LED
+from libs.SIM800L import Modem
 import utime
 from pyb import RTC
 import pyb
@@ -12,9 +13,14 @@ import os
 
 GPS_LOG_TIME = 5000  # 5s
 SHUTOFF_TIME = 30000  # 30s of no CAN activity
+TOKEN = "REDACTED"
+
 
 VERSION = 0.1
-PATH = '' # FIXME /sd/
+PATH = ''  # FIXME /sd/
+
+# This will hold CAN IDs to be filtered for in the can log
+can_filter = []
 
 # Logs input to can.log
 # args will be seperated by komma and printed each time a new line
@@ -24,11 +30,12 @@ def log(*args, file='can.log'):
     os.sync()
 
 
-# Override is working | TODO test modem working? -> definitly response.content (see implementation!)
+# Override is working | TODO test modem working?
 def ota():
-    url = 'https://raw.githubusercontent.com/jsonnet/CANLogger/master/version?token=ABOA4NLENQYN3IFQMFUI77S6N6OZW'
+    url = 'https://raw.githubusercontent.com/jsonnet/CANLogger/master/version'
     response = modem.http_request(url, 'GET')
-    
+
+    # TODO resp content could now be changed to text
     # If a newer version is available
     if float(response.content) > VERSION:
         url = 'https://raw.githubusercontent.com/jsonnet/CANLogger/master/code/main.py'
@@ -40,9 +47,10 @@ def ota():
             os.sync()
             machine.soft_reset()
 
+
 def setup():
     # FIXME convert to class
-    global gps, rtc, can, can2, gps_uart, sim_uart, interrupt, modem
+    global gps, rtc, can, can2, gps_uart, sim_uart, interrupt, modem, telegram
     
     # GPS init
     gps_uart = UART(1, 9600)  # init with given baudrate
@@ -50,10 +58,12 @@ def setup():
     gps = MicropyGPS()
 
     # CAN init (500 MHz)
-    can = CAN(1, CAN.NORMAL, prescaler=4, sjw=1, bs1=16, bs2=4, auto_restart=True)
-    can2 = CAN(2, CAN.NORMAL, prescaler=4, sjw=1, bs1=14, bs2=6)
-    #can.setfilter(0, CAN.MASK32, 0, (0x0, 0x0))
-    can.setfilter(0, CAN.LIST16, 0, (23, 24, 25, 26))
+    can = CAN(1, CAN.NORMAL)
+    can2 = CAN(2, CAN.NORMAL)
+    can.init(CAN.NORMAL, prescaler=4, sjw=1, bs1=16, bs2=4, auto_restart=True)
+    can2.init(CAN.NORMAL, prescaler=4, sjw=1, bs1=14, bs2=6, auto_restart=True)
+    can.setfilter(0, CAN.MASK32, 0, (0,0))
+    #can.setfilter(0, CAN.LIST16, 0, (23, 24, 25, 26))
 
     # SIM800L init
     sim_uart = UART(4, 9600, timeout=1000)
@@ -73,50 +83,74 @@ def setup():
     ota()
     
     # Telegram Bot
-    telegram = api.TelegramBot('API-KEY')
+    telegram = TelegramBot(token=TOKEN, modem=modem)
 
 
 # Callback function for incoming call to initiate attack mode
 def incoming_call(_):
     global interrupt
-    # TODO modem hangup (already implemented cmd in modem!)
-    # TODO possibly send SMS as conformation?
-    # TODO light up some LEDs
+    # Hangup call
+    modem.hangup()
+
+    # TODO possibly send SMS as conformation? or telegram but user must be known?!
+
+    # light up red and yellow to indicate attack mode
+    LED(2).on()
+    LED(4).on()
+
     interrupt = True
-
-# FIXME needs a lot of work
-def handle():
-    global interrupt
-    modem.connect(apn=modem.scan_networks())  # FIXME check apn
-    url = 'uni'  # FIXME add correct Website
-    response = modem.http_request(url, 'GET')
-
-    # FIXME Add other commands
-
-    url = 'Upload'  # FIXME add correct Website
-    with open(PATH + 'can.log', 'r') as f:
-        data = f.read()  # Okay, will print \n explicitly!
-    response = modem.http_request(url, 'POST', data, 'application/text')
-    if response.status_code == 200:
-        os.remove(PATH + 'can.log')
-
-    # TODO only with EXIT command
-    interrupt = False
 
 
 # PoC for Telegram
 def message_handler(messages):
+    global interrupt
+    # TODO maybe check if user is permitted?
     for message in messages:
         if message[2] == '/start':
             telegram.send(message[0], 'CAN Logger in attack mode, ready for you!')
         else:
-            # do something switch case for all commands
-            
-            telegram.send(message[0], 'Okay!')
-    #gc.collect()
+            if message['text'] == "log":
+                params = message['text'].split(" ")[1:]
+                # get
+                if params[0] == 'get':
+                    with open(PATH + 'can.log', 'r') as f:
+                        data = f.read()  # Okay, will print \n explicitly!
+                    telegram.send(message[0], data)
+                    os.remove(PATH + 'can.log')
 
-telegram.listen(message_handler)
+                # clear
+                elif params[0] == 'clear':
+                    os.remove(PATH + 'can.log')
 
+            elif message['text'] == "Replay":
+                params = message['text'].split(" ")[1:]
+                # split for params in msg
+                pass
+            elif message['text'] == "ingestion":
+                params = message['text'].split(" ")[1:]
+                # split for params in msg
+                pass
+            elif message['text'] == "filter":  # CAN Log Filter by ID
+                params = message['text'].split(" ")[1:]
+                # add
+                if params[0] == 'add':
+                    for id in params[1:]:
+                        can_filter.append(id)
+                # remove
+                elif params[0] == 'remove':
+                    for id in params[1:]:
+                        can_filter.remove(id)
+                # clear
+                elif params[0] == 'clear':
+                    can_filter.clear()
+
+            elif message['text'] == "exit":
+                LED(2).off()
+                LED(4).off()
+                LED(3).on()
+                interrupt = False
+
+            telegram.send(message[0], 'Executed!')
 
 
 def loop():
@@ -133,12 +167,16 @@ def loop():
             log(rtc.datetime(), gps.latitude_string(), gps.longitude_string(), gps.speed_string())
 
         # Log new incoming can messages
-        #can2.send(b'1234', 23, timeout=10000) ## FIXME debug
-        log(rtc.datetime(), str(can.recv(0)))
-        
+        #can2.send(b'1234', 23, timeout=10000)  ## FIXME debug
+        can_id, can_rtr, can_fmi, can_Data = can.recv(0)
+
+        # Filter for CAN Log
+        if not can_filter or can_id in can_filter:
+            log(rtc.datetime(), str(can_id), str(can_Data))
+
         ## Attack mode ##
         while interrupt:
-            handle()
+            telegram.listen(message_handler)
 
 
 setup()

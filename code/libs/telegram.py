@@ -1,18 +1,25 @@
 import time
 import gc
-import ujson
-import urequests
+import json  #FIXME ujson
+#import ujson as json #FIXME ujson
 
 
 class TelegramBot:
     
-    def __init__(self, token):
+    def __init__(self, token, modem):
+        self.modem = modem
+
         self.url = 'https://api.telegram.org/bot' + token
 
         self.kbd = {
-            'keyboard': [],  # [["I'm home", "Click"], ["Register", "Knock"]] <-- possibly smth like that for a 2x2 grid of cmds?!
+            'keyboard': [],
             'resize_keyboard': True,
             'one_time_keyboard': True}
+
+        # self.kbd = {
+        #     'keyboard': [["CAN Log", "GPS Log"], ["Replay", "Insert"]], # <-- possibly smth like that for a 2x2 grid of cmds?!
+        #     'resize_keyboard': True,
+        #     'one_time_keyboard': True}
 
         self.upd = {
             'offset': 0,
@@ -26,8 +33,25 @@ class TelegramBot:
             self.kbd['keyboard'] = keyboard
             data['reply_markup'] = json.dumps(self.kbd)
         try:
-            urequests.post(self.url + '/sendMessage', json=data)
-            #FIXME modem here
+            # TODO testing
+            resp = self.modem.http_request(url=self.url + '/sendMessage', mode='POST', data=data, content_type='application/json')
+            return resp.status_code
+        except:
+            pass
+        finally:
+            gc.collect()
+
+    # TODO WIP
+    def sendFile(self, chat_id, file, keyboard=None):
+        data = {'chat_id': chat_id, 'document': file}
+        if keyboard:
+            self.kbd['keyboard'] = keyboard
+            data['reply_markup'] = json.dumps(self.kbd)
+        try:
+            pass
+            # Upload file as multipart/form-data
+            # requests.post(self.url + '/sendDocument', json=data)
+            # FIXME implement
         except:
             pass
         finally:
@@ -36,8 +60,11 @@ class TelegramBot:
     def update(self):
         result = []
         try:
-            jo = urequests.post(self.url + '/getUpdates', json=self.upd).json()
-            #FIXME modem here
+            resp = self.modem.http_request(url=self.url + '/getUpdates', mode='POST', data=self.upd,
+                                           content_type='application/json')
+            # jo = requests.post(self.url + '/getUpdates', json=self.upd).json()
+            # TODO testing
+            jo = json.loads(resp.text)
         except:
             return None
         finally:
@@ -56,9 +83,9 @@ class TelegramBot:
         return result
 
     def listen(self, handler):
-        while True:
-            messages = self.update()
-            if messages:
-                handler(messages)
-            time.sleep(3)
-            gc.collect()
+        #while True:
+        messages = self.update()
+        if messages:
+            handler(messages)
+        time.sleep(2)
+        #gc.collect()

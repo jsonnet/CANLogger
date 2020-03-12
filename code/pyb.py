@@ -244,7 +244,7 @@ class CAN:
         """
         pass
 
-    def init(self, mode, extframe=False, prescaler=100, sjw=1, bs1=6, bs2=8):
+    def init(self, mode, extframe=False, prescaler=100, sjw=1, bs1=6, bs2=8, auto_restart=False):
         """
         Initialise the CAN bus with the given parameters
         """

@@ -1,27 +1,7 @@
 
 # Imports
-import time
 import json
-
-# Setup logging.
-try:
-    import logging
-    logger = logging.getLogger(__name__)
-
-except:
-    class Logger(object):
-        level = 'INFO'
-        @classmethod
-        def debug(cls, text):
-            if cls.level == 'DEBUG': print('DEBUG:', text)
-        @classmethod
-        def info(cls, text):
-            print('INFO:', text)
-        @classmethod
-        def warning(cls, text):
-            print('WARN:', text)
-
-    logger = Logger()
+import time
 
 
 class GenericATError(Exception):
@@ -30,54 +10,41 @@ class GenericATError(Exception):
 
 class Response(object):
 
-    def __init__(self, status_code, content):
+    def __init__(self, content, status_code=200):
         self.status_code = int(status_code)
-        self.content     = content
+        self.encoding = "utf-8"
+        self._cached = content
+        self.status = status_code
+
+    def close(self):
+        self._cached = None
+
+    @property
+    def content(self):
+        return self._cached
+
+    @property
+    def text(self):
+        return str(self.content, self.encoding)
+
+    def json(self):
+        import ujson
+        return ujson.loads(self.content)
 
 
 class Modem(object):
 
-    def __init__(self, uart):  # , MODEM_PWKEY_PIN, MODEM_RST_PIN, MODEM_POWER_ON_PIN, MODEM_TX_PIN, MODEM_RX_PIN
-
-        # Pins
-#        self.MODEM_PWKEY_PIN    = MODEM_PWKEY_PIN
-#        self.MODEM_RST_PIN      = MODEM_RST_PIN
-#        self.MODEM_POWER_ON_PIN = MODEM_POWER_ON_PIN
-#        self.MODEM_TX_PIN       = MODEM_TX_PIN
-#        self.MODEM_RX_PIN       = MODEM_RX_PIN
+    def __init__(self, uart):
 
         self.initialized = False
         self.modem_info = None
         
         self.uart = uart
 
-
     #----------------------
     #  Modem initializer
     #----------------------
-
     def initialize(self):
-
-        logger.debug('Initializing modem...')
-
-
-        #from machine import UART, Pin
-
-        # Pin initialization
-#        MODEM_PWKEY_PIN_OBJ = Pin(self.MODEM_PWKEY_PIN, Pin.OUT);
-#        MODEM_RST_PIN_OBJ = Pin(self.MODEM_RST_PIN, Pin.OUT)
-#        MODEM_POWER_ON_PIN_OBJ = Pin(self.MODEM_POWER_ON_PIN, Pin.OUT)
-        #MODEM_TX_PIN_OBJ = Pin(self.MODEM_TX_PIN, Pin.OUT) # Not needed as we use MODEM_TX_PIN
-        #MODEM_RX_PIN_OBJ = Pin(self.MODEM_RX_PIN, Pin.IN)  # Not needed as we use MODEM_RX_PIN
-
-        # Status setup
-#        MODEM_PWKEY_PIN_OBJ.value(0)
-#        MODEM_RST_PIN_OBJ.value(1)
-#        MODEM_POWER_ON_PIN_OBJ.value(1)
-
-        # Setup UART
-#        self.uart = UART(1, 9600, timeout=1000)  # , rx=self.MODEM_TX_PIN, tx=self.MODEM_RX_PIN)
-
         # Test AT commands
         retries = 0
         while True:
@@ -86,14 +53,14 @@ class Modem(object):
             except:
                 retries+=1
                 if retries < 3:
-                    logger.debug('Error in getting modem info, retrying.. (#{})'.format(retries))
+                    #logger.debug('Error in getting modem info, retrying.. (#{})'.format(retries))
                     time.sleep(3)
                 else:
                     raise
             else:
                 break
 
-        logger.debug('Ok, modem "{}" is ready and accepting commands'.format(self.modem_info))
+        #logger.debug('Ok, modem "{}" is ready and accepting commands'.format(self.modem_info))
 
         # Set initialized flag and support vars
         self.initialized = True
@@ -153,7 +120,7 @@ class Modem(object):
 
         # Execute the AT command
         command_string_for_at = "{}\r\n".format(command_string)
-        logger.debug('Writing AT command "{}"'.format(command_string_for_at.encode('utf-8')))
+        #logger.debug('Writing AT command "{}"'.format(command_string_for_at.encode('utf-8')))
         self.uart.write(command_string_for_at)
 
         # Support vars
@@ -172,7 +139,7 @@ class Modem(object):
                     #logger.warning('Timeout for command "{}" (timeout={})'.format(command, timeout))
                     #break
             else:
-                logger.debug('Read "{}"'.format(line))
+                #logger.debug('Read "{}"'.format(line))
 
                 # Convert line to string
                 line_str = line.decode('utf-8')
@@ -183,17 +150,17 @@ class Modem(object):
 
                 # If we had a pre-end, do we have the expected end?
                 if line_str == '{}\r\n'.format(excpected_end):
-                    logger.debug('Detected exact end')
+                    #logger.debug('Detected exact end')
                     break
                 if pre_end and line_str.startswith('{}'.format(excpected_end)):
-                    logger.debug('Detected startwith end (and adding this line to the output too)')
+                    #logger.debug('Detected startwith end (and adding this line to the output too)')
                     output += line_str
                     break
 
                 # Do we have a pre-end?
                 if line_str == '\r\n':
                     pre_end = True
-                    logger.debug('Detected pre-end')
+                    #logger.debug('Detected pre-end')
                 else:
                     pre_end = False
 
@@ -222,15 +189,18 @@ class Modem(object):
             if output.endswith('\n'):
                 output = output[:-1]
 
-        logger.debug('Returning "{}"'.format(output.encode('utf8')))
+        #logger.debug('Returning "{}"'.format(output.encode('utf8')))
 
         # Return
         return output
 
-
     #----------------------
     #  Function commands
     #----------------------
+
+    def hangup(self):
+        output = self.execute_at_command('hangup')
+        return output
 
     def get_info(self):
         output = self.execute_at_command('modeminfo')
@@ -290,26 +260,26 @@ class Modem(object):
 
         # Are we already connected?
         if self.get_ip_addr():
-            logger.debug('Modem is already connected, not reconnecting.')
+            #logger.debug('Modem is already connected, not reconnecting.')
             return
 
         # Closing bearer if left opened from a previous connect gone wrong:
-        logger.debug('Trying to close the bearer in case it was left open somehow..')
+        #logger.debug('Trying to close the bearer in case it was left open somehow..')
         try:
             self.execute_at_command('closebear')
         except GenericATError:
             pass
 
         # First, init gprs
-        logger.debug('Connect step #1 (initgprs)')
+        #logger.debug('Connect step #1 (initgprs)')
         self.execute_at_command('initgprs')
 
         # Second, set the APN
-        logger.debug('Connect step #2 (setapn)')
+        #logger.debug('Connect step #2 (setapn)')
         self.execute_at_command('setapn', apn)
 
         # Then, open the GPRS connection.
-        logger.debug('Connect step #3 (opengprs)')
+        #logger.debug('Connect step #3 (opengprs)')
         self.execute_at_command('opengprs')
 
         # Ok, now wait until we get a valid IP address
@@ -322,7 +292,7 @@ class Modem(object):
                 retries += 1
                 if retries > max_retries:
                     raise Exception('Cannot connect modem as could not get a valid IP address')
-                logger.debug('No valid IP address yet, retrying... (#')
+                #logger.debug('No valid IP address yet, retrying... (#')
                 time.sleep(1)
             else:
                 break
@@ -340,7 +310,6 @@ class Modem(object):
         if ip_addr:
             raise Exception('Error, we should be disconnected but we still have an IP address ({})'.format(ip_addr))
 
-
     def http_request(self, url, mode='GET', data=None, content_type='application/json'):
 
         # Protocol check.
@@ -351,70 +320,70 @@ class Modem(object):
             raise Exception('Error, modem is not connected')
 
         # Close the http context if left open somehow
-        logger.debug('Close the http context if left open somehow...')
+        #logger.debug('Close the http context if left open somehow...')
         try:
             self.execute_at_command('closehttp')
         except GenericATError:
             pass
 
         # First, init and set http
-        logger.debug('Http request step #1.1 (inithttp)')
+        #logger.debug('Http request step #1.1 (inithttp)')
         self.execute_at_command('inithttp')
-        logger.debug('Http request step #1.2 (sethttp)')
+        #logger.debug('Http request step #1.2 (sethttp)')
         self.execute_at_command('sethttp')
 
         # Do we have to enable ssl as well?
         ssl_available = self.modem_info >= 'SIM800 R14.00'
         if ssl_available:
             if url.startswith('https://'):
-                logger.debug('Http request step #1.3 (enablessl)')
+                #logger.debug('Http request step #1.3 (enablessl)')
                 self.execute_at_command('enablessl')
             elif url.startswith('http://'):
-                logger.debug('Http request step #1.3 (disablessl)')
+                #logger.debug('Http request step #1.3 (disablessl)')
                 self.execute_at_command('disablessl')
         else:
             if url.startswith('https://'):
                 raise NotImplementedError("SSL is only supported by firmware revisions >= R14.00")
 
         # Second, init and execute the request
-        logger.debug('Http request step #2.1 (initurl)')
+        #logger.debug('Http request step #2.1 (initurl)')
         self.execute_at_command('initurl', data=url)
 
         if mode == 'GET':
 
-            logger.debug('Http request step #2.2 (doget)')
+            #logger.debug('Http request step #2.2 (doget)')
             output = self.execute_at_command('doget')
-            response_status_code = output.split(',')[1]
-            logger.debug('Response status code: "{}"'.format(response_status_code))
+            response_status_code = int(output.split(',')[1])
+            #logger.debug('Response status code: "{}"'.format(response_status_code))
 
         elif mode == 'POST':
 
-            logger.debug('Http request step #2.2 (setcontent)')
+            #logger.debug('Http request step #2.2 (setcontent)')
             self.execute_at_command('setcontent', content_type)
 
-            logger.debug('Http request step #2.3 (postlen)')
+            #logger.debug('Http request step #2.3 (postlen)')
             self.execute_at_command('postlen', len(data))
 
-            logger.debug('Http request step #2.4 (dumpdata)')
+            #logger.debug('Http request step #2.4 (dumpdata)')
             self.execute_at_command('dumpdata', data)
 
-            logger.debug('Http request step #2.5 (dopost)')
+            #logger.debug('Http request step #2.5 (dopost)')
             output = self.execute_at_command('dopost')
-            response_status_code = output.split(',')[1]
-            logger.debug('Response status code: "{}"'.format(response_status_code))
+            response_status_code = int(output.split(',')[1])
+            #logger.debug('Response status code: "{}"'.format(response_status_code))
 
 
         else:
             raise Exception('Unknown mode "{}'.format(mode))
 
         # Third, get data
-        logger.debug('Http request step #4 (getdata)')
+        #logger.debug('Http request step #4 (getdata)')
         response_content = self.execute_at_command('getdata', clean_output=False)
 
-        logger.debug(response_content)
+        #logger.debug(response_content)
 
         # Then, close the http context
-        logger.debug('Http request step #4 (closehttp)')
+        #logger.debug('Http request step #4 (closehttp)')
         self.execute_at_command('closehttp')
 
         return Response(status_code=response_status_code, content=response_content)
