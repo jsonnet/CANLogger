@@ -1,34 +1,37 @@
-##CAN Logger Design Idea
+## CAN Logger Design Idea
 
-###Init Phase
+### Init Phase
 - Init GPS / GSM connections
+- Init CAN controllers to 500 kbps and open filter
 - Check online for new software update (OTA - GitHub)
+- Init Telegram Bot
 
-###Logging Phase
+### Logging Phase
 - Log incoming CAN messages with timestamp (unix) and ID in log file
+- If filter is set only log for specified can ids
 - Log periodically GPS position data with timestamp to match
 - Log accelerometer data 
-- Check for attack flag
+- Check for attack flag set by GSM Modul upon a call interrupt
+- If no new CAN messages arrive wait for timeout and set soft sleep
 
-###Attack Phase
-- Check online web hook for commands and execute (new IDEA Telegram/Discord Bot)
+### Attack Phase
+- Check Telegram for new command and execute
 - Replay attack (parameter with id)
-- Ingestion attack (parameter with id to send from and payload)
+- Injection attack (parameter with id to send from and payload)
 - Bus-Off attack for specific modules
-- Also a possibility to upload the logs to a specific place
-- Execute commands until receiving a exit cmd
+- Set filter for specific CAN ids during logging
+- Download log file via Telegram
+- Wait and execute commands until receiving a exit cmd
 
 
-
-##Execution Plan
+## Execution Plan
 - OTA update by checking the current installed version against the one online (GET request to GitHub for latest version), if newer one is found override main file and do soft restart
-- The attack phase should get initiated with a call to the GSM module, as it features a RING pin which goes HIGH when receiving a call. Thus we can use an interrupt which features a flag that gets set (also the call should be ended and possibly a conformation SMS is send). _Alternativly it would be possible to send a SMS and do a call alert but would require checking instead of passive interrupt_
-- Also we should monitor when the car is shutoff (so no more messages for a specific time) as we are connected to constant power. Thus when turned off, we put the GSM and GPS as well as the board to sleep. (The SN65HVD230 should have a feature to interrupt when new messages are received so to turn on the board and everything again)
+- The attack phase should get initiated with a call to the GSM module, as it features a RING pin which goes HIGH when receiving a call. Thus we can use an interrupt which features a flag that gets set. During this phase the board will check Telegram for new commands to be executed.
+- Also we should monitor when the car is shutoff (so no more messages for a specific time) as we are connected to constant power. Thus when turned off, we put the GSM and GPS as well as the board to sleep. The board will also be in soft sleep and wake up every few seconds to check for new messages else it will go to sleep again (reduces board power consumption to ~500 uA)
 - The GPS module keeps track of satellites and position by itself but it is necessary to periodically request the data and log it (also logging once  every couple seconds should be way enough and reduces overhead)
 
 
-##TODOs
-- [ ] still the CAN transceiver is not working as expected (or at all)
-- [ ] SIM800L still good? Also needs SIM from ThingsMobile!
+## TODOs
+- [ ] SIM800L working, but has power problems
 - [ ] SD Card needs to be bought
-- [ ] Code implementation
+- [ ] Check for overhead during logging to disk!
