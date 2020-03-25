@@ -1,3 +1,8 @@
+# This is just an interface so that your IDE will recognize pyb as it is a proprietary upython packet for pyboards
+# No implementation is needed here!
+# Do not add this to your active implementation on your pyboard
+# Does not necessarily reflect the most recent changes
+
 def delay(ms):
     """
     Delay for the given number of milliseconds.

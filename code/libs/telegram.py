@@ -1,25 +1,20 @@
-import time
 import gc
-import json  #FIXME ujson
-#import ujson as json #FIXME ujson
+import json as json  # FIXME ujson
+import time
 
 
 class TelegramBot:
-    
+
     def __init__(self, token, modem):
         self.modem = modem
 
         self.url = 'https://api.telegram.org/bot' + token
 
         self.kbd = {
-            'keyboard': [],
+            'keyboard': [["log get", "log clear"], ["replay", "injection", "busoff"], ["filter", "filter clear"],
+                         ["ota", "help", "exit"]],
             'resize_keyboard': True,
             'one_time_keyboard': True}
-
-        # self.kbd = {
-        #     'keyboard': [["CAN Log", "GPS Log"], ["Replay", "Insert"]], # <-- possibly smth like that for a 2x2 grid of cmds?!
-        #     'resize_keyboard': True,
-        #     'one_time_keyboard': True}
 
         self.upd = {
             'offset': 0,
@@ -33,8 +28,9 @@ class TelegramBot:
             self.kbd['keyboard'] = keyboard
             data['reply_markup'] = json.dumps(self.kbd)
         try:
-            # TODO testing
-            resp = self.modem.http_request(url=self.url + '/sendMessage', mode='POST', data=data, content_type='application/json')
+            # TODO test
+            resp = self.modem.http_request(url=self.url + '/sendMessage', mode='POST', data=data,
+                                           content_type='application/json')
             return resp.status_code
         except:
             pass
@@ -51,6 +47,7 @@ class TelegramBot:
             pass
             # Upload file as multipart/form-data
             # requests.post(self.url + '/sendDocument', json=data)
+            # https://api.telegram.org/file/bot<token>/<file_path> ???
             # FIXME implement
         except:
             pass
@@ -79,13 +76,13 @@ class TelegramBot:
                                    item['message']['text']))
         if len(result) > 0:
             self.upd['offset'] = jo['result'][-1]['update_id'] + 1
-            
+
         return result
 
     def listen(self, handler):
-        #while True:
+        # while True:
         messages = self.update()
         if messages:
             handler(messages)
         time.sleep(2)
-        #gc.collect()
+        # gc.collect()
