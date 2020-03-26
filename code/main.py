@@ -1,5 +1,5 @@
-import binascii as binascii  # FIXME ubinascii
-import os as os #FIXME uos
+import binascii 
+import os
 
 import machine
 import utime

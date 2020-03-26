@@ -1,5 +1,5 @@
 import gc
-import json as json  # FIXME ujson
+import json
 import time
 
 
