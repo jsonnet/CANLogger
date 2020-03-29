@@ -1,4 +1,5 @@
-import binascii 
+import binascii
+import gc
 import os
 
 import machine
@@ -15,12 +16,19 @@ class CANLogger(object):
     def __init__(self):
         # Constants and variables #
 
+        self.GPS_OFF = (0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74)
+        self.GPS_ON = (0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76)
+
         self.GPS_LOG_TIME = 5000  # 5s
         self.SHUTOFF_TIME = 30000  # 30s of no CAN activity
         self.TOKEN = "REDACTED"
 
         self.VERSION = 0.1
-        self.PATH = ''  # FIXME /sd/
+        if 'sd' in os.listdir('/'):
+            self.PATH = '/sd/'
+        else:
+            self.PATH = ''
+        self.CAN_FILE = open(self.PATH + 'can.log', 'a+')
 
         # This will hold CAN IDs to be filtered for in the can log
         self.can_filter = []
@@ -48,10 +56,9 @@ class CANLogger(object):
         self.modem.initialize()
 
         print(self.modem.scan_networks())
-
         self.modem.connect(apn="internet.eplus.de")  # FIXME check apn or set static
 
-        # Clock init #TODO set correct time and connect battery
+        # Clock init
         self.rtc = RTC()
         self.rtc.wakeup(timeout=5000)  # wakeup call every 5s
 
@@ -72,11 +79,19 @@ class CANLogger(object):
     # Logs input to can.log
     # args will be separated by comma and printed each time a new line
     def log(self, *args, file='can.log'):
-        with open(self.PATH + file, 'a') as f:
-            print(','.join(args), file=f)
-        os.sync()
+        # With this case writing to can.log is quite a lot faster, as closing a file takes ages due to writing to fs
+        # But we must ensure to close the file at some point
+        if file is not 'can.log':
+            with open(self.PATH + file, 'a+') as f:
+                print(','.join(args), file=f)
+            os.sync()
+        else:
+            # ensure we have an open file
+            if self.CAN_FILE.closed:
+                self.CAN_FILE = self.CAN_FILE = open(self.PATH + 'can.log', 'a+')
+            print(','.join(args), file=self.CAN_FILE)
 
-    # Override is working | TODO test modem working?
+    # Override is working
     def ota(self):
         url = 'https://raw.githubusercontent.com/jsonnet/CANLogger/master/version'
         response = self.modem.http_request(url, 'GET')
@@ -171,8 +186,10 @@ class CANLogger(object):
 
                     self.can.setfilter(0, CAN.LIST16, 0, (mark_id, vic_id,))
 
-                    # Clear buffer (maybe/hopefully) #FIXME this could break if no message there yet
+                    # Clear buffer (maybe/hopefully)
                     for _ in range(5):
+                        if not self.can.any(0):
+                            break
                         self.can.recv(0)
 
                     count = 0
@@ -235,6 +252,10 @@ class CANLogger(object):
                     """
         self.telegram.send(message[0], helpme)
 
+    def sendGPSCmd(self, cmd):
+        for i in range(len(cmd)):
+            self.gps_uart.writechar(cmd[i])
+
     def loop(self):
         gps_time = utime.ticks_ms()
 
@@ -245,11 +266,13 @@ class CANLogger(object):
                 continue
             elif self.shutdown and self.can.any(0):
                 self.shutdown = False
-                # TODO restart modules
+                self.gsm_sleep.value(0)
+                self.sendGPSCmd(self.GPS_ON)
 
             # Main loop
             if not self.interrupt:
-
+                # Free memory
+                gc.collect()
                 ## Logging mode ##
 
                 # Only log gps once a few seconds
@@ -273,14 +296,16 @@ class CANLogger(object):
                 except OSError:
                     # We timed out from can connection -> could mean car is shut down
                     self.shutdown = True
+                    self.CAN_FILE.close()
+                    os.sync()
+                    self.gsm_sleep.value(1)
+                    self.sendGPSCmd(self.GPS_OFF)
                     continue
-
-                    # Shutdown gps and gsm
-                    # TODO set correct external pin for modules to power down
-                    pass
 
             else:
                 ## Attack mode ##
+                self.CAN_FILE.close()  # Close log file first
+                os.sync()
                 while self.interrupt:
                     self.telegram.listen(self.message_handler)
 

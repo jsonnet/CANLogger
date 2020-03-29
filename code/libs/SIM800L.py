@@ -1,6 +1,7 @@
 # Imports
 import json
 import time
+import gc
 
 
 class GenericATError(Exception):
@@ -202,7 +203,10 @@ class Modem(object):
         # logger.debug('Returning "{}"'.format(output.encode('utf8')))
 
         # Return
-        return output
+        try:
+            return output
+        finally:
+            gc.collect()
 
     # ----------------------
     #  Function commands

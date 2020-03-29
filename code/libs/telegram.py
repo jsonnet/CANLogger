@@ -85,4 +85,4 @@ class TelegramBot:
         if messages:
             handler(messages)
         time.sleep(2)
-        # gc.collect()
+        gc.collect()
