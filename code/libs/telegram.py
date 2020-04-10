@@ -11,10 +11,11 @@ class TelegramBot:
         self.url = 'https://api.telegram.org/bot' + token
 
         self.kbd = {
-            'keyboard': [["log get", "log clear"], ["replay", "injection", "busoff"], ["filter", "filter clear"],
+            'keyboard': [["log get", "log clear"], ["replay", "injection", "busoff", "reply"],
+                         ["filter", "filter clear"],
                          ["ota", "help", "exit"]],
             'resize_keyboard': True,
-            'one_time_keyboard': True}
+            'one_time_keyboard': False}
 
         self.upd = {
             'offset': 0,
@@ -29,6 +30,7 @@ class TelegramBot:
             data['reply_markup'] = json.dumps(self.kbd)
         try:
             # TODO test
+            data['reply_markup'] = json.dumps(self.kbd)
             resp = self.modem.http_request(url=self.url + '/sendMessage', mode='POST', data=data,
                                            content_type='application/json')
             return resp.status_code
@@ -37,7 +39,7 @@ class TelegramBot:
         finally:
             gc.collect()
 
-    # TODO WIP
+    # TODO test
     def sendFile(self, chat_id, file, keyboard=None):
         data = {'chat_id': chat_id, 'document': file}
         if keyboard:
@@ -46,9 +48,10 @@ class TelegramBot:
         try:
             pass
             # Upload file as multipart/form-data
-            # requests.post(self.url + '/sendDocument', json=data)
-            # https://api.telegram.org/file/bot<token>/<file_path> ???
-            # FIXME implement
+            # requests.post(url+"/sendDocument", {'chat_id':'ID'}, files={'document':('file.name',open('file','rb'))})
+            resp = self.modem.http_request(url=self.url + '/sendMessage', mode='POST', data=data,
+                                           content_type='multipart/form-data')
+            return resp.status_code
         except:
             pass
         finally:

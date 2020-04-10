@@ -32,6 +32,4 @@
 
 
 ## TODOs
-- [ ] SIM800L working, but has power problems
 - [ ] SD Card needs to be bought
-- [ ] Check for overhead during logging to disk!
