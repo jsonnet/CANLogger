@@ -1,5 +1,7 @@
+# Created by Joshua Sonnet
+# (c) 2020 under GLP-3.0
+
 import binascii
-import gc
 import os
 
 import machine
@@ -16,6 +18,7 @@ class CANLogger(object):
     def __init__(self):
         # Constants and variables #
 
+        # UART cmd to en-/disable the GPS
         self.GPS_OFF = (0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74)
         self.GPS_ON = (0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76)
 
@@ -24,7 +27,7 @@ class CANLogger(object):
         self.SHUTOFF_TIME = 30000  # 30s of no CAN activity
         self.TOKEN = "REDACTED"
 
-        self.VERSION = 0.1
+        self.VERSION = 1.0
         if 'sd' in os.listdir('/'):
             self.PATH = '/sd/'
         else:
@@ -57,8 +60,7 @@ class CANLogger(object):
         self.modem.initialize()
 
         try:
-            print(self.modem.scan_networks())
-            self.modem.connect(None)
+            self.modem.connect('internet.eplus.de')
         except:
             self.SIM_DISABLED = True
             print("LOG ONLY MODE (NO GSM)")
@@ -71,12 +73,12 @@ class CANLogger(object):
         self.interrupt = False
         pyb.ExtInt('X5', pyb.ExtInt.IRQ_FALLING, pyb.Pin.PULL_UP, self.incoming_call)
 
-        # Sleep pins
+        # Sleep pins for GSM
         self.gsm_sleep = pyb.Pin('X6', pyb.Pin.OUT_PP)
         self.gsm_sleep.value(0)
 
-        # Software Update
         if not self.SIM_DISABLED:
+            # Software Update
             self.ota()
 
             # Telegram Bot
@@ -93,7 +95,7 @@ class CANLogger(object):
             os.sync()
         else:
             # ensure we have an open file
-            # if self.CAN_FILE.closed:  # closed does not exists, so seed workaround below
+            # if self.CAN_FILE.closed:  # closed does not exists, thus need workaround below
             try:
                 self.CAN_FILE.read()
             except OSError:
@@ -130,9 +132,8 @@ class CANLogger(object):
         for u in self.allowed_users:
             self.telegram.send(u, 'Ready in attack mode!')
 
-        # light up red and yellow to indicate attack mode
-        LED(2).on()
-        LED(4).on()
+        # light up yellow to indicate attack mode
+        LED(3).intensity(16)
 
         self.interrupt = True
 
@@ -191,8 +192,20 @@ class CANLogger(object):
                         self.can2.send(can_data, can_id, timeout=1000)
                         pyb.delay(_delay)
                 elif message['text'] == "reply":
-                    pass
-                    # TODO reply to a given message with another message
+
+                    params = message['text'].strip().split(" ")[1:]
+                    if len(params) < 4:
+                        self.helpMessage(message)
+                        continue
+
+                    id, message, id_a, answer = params[0:3]
+
+                    while True:
+                        can_id, _, _, can_data = self.can.recv(0)
+
+                        if can_id == id and can_data == message:
+                            self.can2.send(answer, id_a, timeout=1000)
+                            break
                 elif message['text'] == "busoff":  # TODO WIP feature only manual at that point
                     params = message['text'].strip().split(" ")[1:]
 
@@ -251,8 +264,7 @@ class CANLogger(object):
                     self.helpMessage(message)
 
                 elif message['text'] == "exit":
-                    LED(2).off()
-                    LED(4).off()
+                    LED(3).off()
                     self.interrupt = False
 
                 self.telegram.send(message[0], 'Executed!')

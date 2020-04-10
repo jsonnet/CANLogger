@@ -1,7 +1,22 @@
-# Imports
+# Source https://github.com/pythings/Drivers/blob/master/SIM800L.py
+# Originally by sarusso
+# Modified by Joshua Sonnet 2020
+
 import gc
 import json
 import time
+
+
+def convert_to_string(buf):
+    try:
+        tt = buf.decode('utf-8').strip()
+        return tt
+    except UnicodeError:
+        tmp = bytearray(buf)
+        for i in range(len(tmp)):
+            if tmp[i] > 127:
+                tmp[i] = ord('#')
+        return bytes(tmp).decode('utf-8').strip()
 
 
 class GenericATError(Exception):
@@ -50,8 +65,8 @@ class Modem(object):
         while True:
             try:
                 self.modem_info = self.execute_at_command('modeminfo')
-                self.modem_info = self.execute_at_command('wakeup')
-                self.modem_info = self.execute_at_command('dumpdata', 'AT+CMEE=2')
+                self.execute_at_command('wakeup')
+                self.execute_at_command('dumpdata', 'AT+CMEE=0')
             except:
                 retries += 1
                 if retries < 3:
@@ -118,21 +133,30 @@ class Modem(object):
         if command not in commands:
             raise Exception('Unknown command "{}"'.format(command))
 
+        # Clear backlog of uart
+        while self.uart.any():
+            self.uart.readchar()
+
         # Support vars
         command_string = commands[command]['string']
         excpected_end = commands[command]['end']
         timeout = commands[command]['timeout']
-        processed_lines = 0
 
-        # Execute the AT command
+        # Fix for adding carriage return to dict (json post request)
+        if type(command_string) is dict:
+            command_string = json.dumps(command_string)
+
+        # Add carriage return to send command
         command_string_for_at = "{}\r\n".format(command_string)
-        # logger.debug('Writing AT command "{}"'.format(command_string_for_at.encode('utf-8')))
+        # Execute the AT command
         self.uart.write(command_string_for_at)
 
         # Support vars
         pre_end = True
         output = ''
         empty_reads = 0
+
+        _ = self.uart.readline()  # discard linefeed etc
 
         while True:
 
@@ -142,42 +166,26 @@ class Modem(object):
                 empty_reads += 1
                 if empty_reads > timeout:
                     raise Exception('Timeout for command "{}" (timeout={})'.format(command, timeout))
-                    # logger.warning('Timeout for command "{}" (timeout={})'.format(command, timeout))
-                    # break
             else:
-                # logger.debug('Read "{}"'.format(line))
-
                 # Convert line to string
-                try:
-                    line_str = line.decode('utf-8')
-                except:
-                    print("there was a decode error")
-                    print(line)
-                    break
+                line_str = convert_to_string(line)
 
                 # Do we have an error?
-                if line_str == 'ERROR\r\n':
-                    print(line_str)
+                if line_str == 'ERROR':
                     raise GenericATError('Got generic AT error')
 
                 # If we had a pre-end, do we have the expected end?
-                if line_str == '{}\r\n'.format(excpected_end):
-                    # logger.debug('Detected exact end')
+                if line_str == excpected_end:
                     break
                 if pre_end and line_str.startswith('{}'.format(excpected_end)):
-                    # logger.debug('Detected startwith end (and adding this line to the output too)')
                     output += line_str
                     break
 
                 # Do we have a pre-end?
-                if line_str == '\r\n':
+                if line_str == '':
                     pre_end = True
-                    # logger.debug('Detected pre-end')
                 else:
                     pre_end = False
-
-                # Keep track of processed lines and stop if exceeded
-                processed_lines += 1
 
                 # Save this line unless in particular conditions
                 if command == 'getdata' and line_str.startswith('+HTTPREAD:'):
